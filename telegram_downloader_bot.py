@@ -59,6 +59,23 @@ COOKIES_FILE = Path("cookies.txt")
 # الحد الأقصى لحجم الملف الذي يمكن للبوت إرساله (تلجرام يسمح بـ 50MB للبوتات العادية)
 MAX_FILE_SIZE_MB = 50
 
+# قائمة بذاكرة البوت (مو دائمة) بمعرّفات كل مستخدم تفاعل مع البوت،
+# تُستخدم لأمر /stats. تتصفّر مع كل إعادة نشر للبوت.
+KNOWN_USERS: set[int] = set()
+
+
+def _track_user(update: Update) -> None:
+    """يسجّل معرّف المستخدم في KNOWN_USERS ويطبع سطر بالسجلات لو كان جديداً."""
+    user = update.effective_user
+    if user is None:
+        return
+    if user.id not in KNOWN_USERS:
+        KNOWN_USERS.add(user.id)
+        logger.info(
+            "مستخدم جديد انضم ✅ | id: %s | اسم المستخدم: %s | إجمالي المستخدمين: %d",
+            user.id, user.username or "-", len(KNOWN_USERS),
+        )
+
 URL_PATTERN = re.compile(
     r"(https?://)?(www\.)?"
     r"(youtube\.com|youtu\.be|tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)"
@@ -142,26 +159,39 @@ def download_video(url: str, unique_id: str, height: int | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _track_user(update)
     await update.message.reply_text(
         "👋 أهلاً بك!\n\n"
         "أرسل لي رابط فيديو من *يوتيوب* أو *تيك توك* وسأقوم بتحميله لك.\n\n"
         "مثال:\n"
         "https://www.tiktok.com/@user/video/1234567890\n"
-        "https://www.youtube.com/watch?v=xxxxxxxx",
+        "https://www.youtube.com/watch?v=xxxxxxxx\n\n"
+        f"👥 عدد المستخدمين الحالي: {len(KNOWN_USERS)}",
         parse_mode=ParseMode.MARKDOWN,
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _track_user(update)
     await update.message.reply_text(
         "الأوامر المتاحة:\n"
         "/start - رسالة الترحيب\n"
-        "/help - عرض هذه الرسالة\n\n"
+        "/help - عرض هذه الرسالة\n"
+        "/stats - عدد المستخدمين الحاليين\n\n"
         "فقط أرسل رابط فيديو من يوتيوب أو تيك توك وسأتولى الباقي."
     )
 
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _track_user(update)
+    await update.message.reply_text(
+        f"👥 عدد المستخدمين الحالي: {len(KNOWN_USERS)}\n\n"
+        "(هذا العدد يُحسب منذ آخر تشغيل للبوت، ويتصفّر مع كل تحديث جديد له)"
+    )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _track_user(update)
     text = update.message.text or ""
     url = extract_url(text)
 
@@ -268,6 +298,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("البوت يعمل الآن...")
