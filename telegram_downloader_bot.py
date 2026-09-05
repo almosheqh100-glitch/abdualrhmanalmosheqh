@@ -52,6 +52,10 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "ضع_التوكن_هنا")
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
+# لو ملف cookies.txt موجود بنفس مجلد المشروع، نستخدمه للتحقق مع يوتيوب
+# (يقلل من رسائل "سجّل الدخول لتأكيد أنك لست روبوتًا")
+COOKIES_FILE = Path("cookies.txt")
+
 # الحد الأقصى لحجم الملف الذي يمكن للبوت إرساله (تلجرام يسمح بـ 50MB للبوتات العادية)
 MAX_FILE_SIZE_MB = 50
 
@@ -113,6 +117,9 @@ def download_video(url: str, unique_id: str, height: int | None = None) -> Path:
         # لحجم الملف يصير بعد التحميل في handle_message، مع إعادة محاولة
         # بجودة أقل عبر QUALITY_LADDER لو الملف كبير.
     }
+
+    if COOKIES_FILE.exists():
+        ydl_opts["cookiefile"] = str(COOKIES_FILE)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
@@ -241,6 +248,21 @@ def main() -> None:
             "الرجاء وضع توكن البوت في المتغير BOT_TOKEN أو في متغير البيئة "
             "TELEGRAM_BOT_TOKEN قبل التشغيل."
         )
+
+    # تشخيص: نتأكد من وجود ملف الكوكيز ونطبع تفاصيله بالسجلات لتشخيص
+    # مشاكل التحقق من يوتيوب بسهولة (بدون الحاجة لفتح وحدة التحكم).
+    if COOKIES_FILE.exists():
+        size = COOKIES_FILE.stat().st_size
+        with open(COOKIES_FILE, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        non_comment_lines = [ln for ln in lines if ln.strip() and not ln.startswith("#")]
+        logger.info(
+            "cookies.txt موجود ✅ | الحجم: %d بايت | عدد الأسطر الكلي: %d | "
+            "عدد أسطر الكوكيز الفعلية: %d",
+            size, len(lines), len(non_comment_lines),
+        )
+    else:
+        logger.warning("cookies.txt غير موجود ❌ (البحث في: %s)", COOKIES_FILE.resolve())
 
     app = Application.builder().token(BOT_TOKEN).build()
 
