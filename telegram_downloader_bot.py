@@ -59,6 +59,10 @@ COOKIES_FILE = Path("cookies.txt")
 # الحد الأقصى لحجم الملف الذي يمكن للبوت إرساله (تلجرام يسمح بـ 50MB للبوتات العادية)
 MAX_FILE_SIZE_MB = 50
 
+# رقم حساب المشرف (صاحب البوت) بتلجرام. بس هذا الحساب يشوف عدد
+# المستخدمين وقت /start أو عن طريق أمر /stats.
+ADMIN_ID = 8776724967
+
 # قائمة بذاكرة البوت (مو دائمة) بمعرّفات كل مستخدم تفاعل مع البوت،
 # تُستخدم لأمر /stats. تتصفّر مع كل إعادة نشر للبوت.
 KNOWN_USERS: set[int] = set()
@@ -160,15 +164,17 @@ def download_video(url: str, unique_id: str, height: int | None = None) -> Path:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _track_user(update)
-    await update.message.reply_text(
+    is_admin = update.effective_user is not None and update.effective_user.id == ADMIN_ID
+    message = (
         "👋 أهلاً بك!\n\n"
         "أرسل لي رابط فيديو من *يوتيوب* أو *تيك توك* وسأقوم بتحميله لك.\n\n"
         "مثال:\n"
         "https://www.tiktok.com/@user/video/1234567890\n"
-        "https://www.youtube.com/watch?v=xxxxxxxx\n\n"
-        f"👥 عدد المستخدمين الحالي: {len(KNOWN_USERS)}",
-        parse_mode=ParseMode.MARKDOWN,
+        "https://www.youtube.com/watch?v=xxxxxxxx"
     )
+    if is_admin:
+        message += f"\n\n👥 عدد المستخدمين الحالي: {len(KNOWN_USERS)}"
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -176,24 +182,57 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
         "الأوامر المتاحة:\n"
         "/start - رسالة الترحيب\n"
-        "/help - عرض هذه الرسالة\n"
-        "/stats - عدد المستخدمين الحاليين\n\n"
+        "/help - عرض هذه الرسالة\n\n"
         "فقط أرسل رابط فيديو من يوتيوب أو تيك توك وسأتولى الباقي."
     )
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _track_user(update)
+    # هذا الأمر للمشرف بس؛ نتجاهله بصمت لأي شخص ثاني.
+    if update.effective_user is None or update.effective_user.id != ADMIN_ID:
+        return
     await update.message.reply_text(
         f"👥 عدد المستخدمين الحالي: {len(KNOWN_USERS)}\n\n"
         "(هذا العدد يُحسب منذ آخر تشغيل للبوت، ويتصفّر مع كل تحديث جديد له)"
     )
 
 
+async def broadcast_to_users(context: ContextTypes.DEFAULT_TYPE, sender_id: int, text: str) -> tuple[int, int]:
+    """يرسل نص الرسالة لكل المستخدمين المعروفين ما عدا المرسل نفسه.
+    يرجع (عدد النجاح، عدد الفشل)."""
+    success = 0
+    failed = 0
+    for user_id in list(KNOWN_USERS):
+        if user_id == sender_id:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"📢 إعلان من إدارة البوت:\n\n{text}",
+            )
+            success += 1
+        except Exception:  # noqa: BLE001
+            # المستخدم ممكن يكون حظر البوت أو حذف المحادثة
+            failed += 1
+    return success, failed
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _track_user(update)
     text = update.message.text or ""
     url = extract_url(text)
+    is_admin = update.effective_user is not None and update.effective_user.id == ADMIN_ID
+
+    # لو المرسل هو المشرف وما فيه رابط بالرسالة، نعتبرها رسالة بث
+    # للمستخدمين بدل رسالة "ما لقيت رابط".
+    if not url and is_admin:
+        success, failed = await broadcast_to_users(context, update.effective_user.id, text)
+        await update.message.reply_text(
+            f"✅ تم إرسال الإعلان لـ {success} مستخدم"
+            + (f" (فشل الإرسال لـ {failed})" if failed else "")
+        )
+        return
 
     if not url:
         await update.message.reply_text(
